@@ -1,4 +1,11 @@
-"""Terminal UI: banner, colors, thread-safe progress bar, stealth delay."""
+"""Terminal UI: banner, colors, thread-safe progress bar, stealth delay.
+
+Cyberpunk hacker theme:
+    info   [*] cyan       #00cfff
+    found  [+] neon green #00ff41
+    miss   [-] red        #ff003c
+    warn   [!] yellow     #ffe600
+"""
 
 from __future__ import annotations
 
@@ -23,17 +30,27 @@ except Exception:  # pragma: no cover
     Style = _Dummy()  # type: ignore
 
 
-# Purple-themed palette mapped onto colorama codes
-PURPLE = Fore.MAGENTA
-LIGHT_PURPLE = Fore.LIGHTMAGENTA_EX
-TEAL = Fore.LIGHTCYAN_EX
-GREEN = Fore.LIGHTGREEN_EX
+# ---------------------------------------------------------------------------
+# Cyberpunk palette mapped onto the closest colorama codes.
+#   neon green #00ff41 -> LIGHTGREEN_EX
+#   cyan       #00cfff -> LIGHTCYAN_EX
+#   red        #ff003c -> LIGHTRED_EX
+#   yellow     #ffe600 -> LIGHTYELLOW_EX
+# ---------------------------------------------------------------------------
+NEON_GREEN = Fore.LIGHTGREEN_EX
+CYAN = Fore.LIGHTCYAN_EX
 RED = Fore.LIGHTRED_EX
 YELLOW = Fore.LIGHTYELLOW_EX
 WHITE = Fore.LIGHTWHITE_EX
 DIM = Style.DIM
 BRIGHT = Style.BRIGHT
 RESET = Style.RESET_ALL
+
+# Backwards-compatible aliases (old purple-themed names mapped to new palette)
+GREEN = NEON_GREEN
+PURPLE = NEON_GREEN
+LIGHT_PURPLE = CYAN
+TEAL = CYAN
 
 
 BANNER = r"""
@@ -51,10 +68,14 @@ SUBTAGLINE = "// Authorized intelligence gathering only"
 
 def print_banner(version: str = "2.0.0", stream=None) -> None:
     stream = stream or sys.stderr
-    stream.write(f"{PURPLE}{BRIGHT}{BANNER}{RESET}\n")
-    stream.write(f"{LIGHT_PURPLE}{BRIGHT}             {TAGLINE}{RESET}\n")
-    stream.write(f"{DIM}{LIGHT_PURPLE}                  {SUBTAGLINE}{RESET}\n")
-    stream.write(f"{DIM}{LIGHT_PURPLE}                       v{version}{RESET}\n\n")
+    # Banner: neon green
+    stream.write(f"{NEON_GREEN}{BRIGHT}{BANNER}{RESET}\n")
+    # Tagline 1: cyan accent
+    stream.write(f"{CYAN}{BRIGHT}             {TAGLINE}{RESET}\n")
+    # Tagline 2: dim neon green
+    stream.write(f"{DIM}{NEON_GREEN}                  {SUBTAGLINE}{RESET}\n")
+    # Tagline 3: version
+    stream.write(f"{DIM}{NEON_GREEN}                       v{version}{RESET}\n\n")
     stream.flush()
 
 
@@ -72,18 +93,22 @@ def _log(prefix_color: str, prefix: str, msg: str) -> None:
 
 
 def info(msg: str) -> None:
-    _log(LIGHT_PURPLE, "*", msg)
+    # [*] -> cyan
+    _log(CYAN, "*", msg)
 
 
 def found(msg: str) -> None:
-    _log(GREEN, "+", msg)
+    # [+] -> neon green
+    _log(NEON_GREEN, "+", msg)
 
 
 def miss(msg: str) -> None:
+    # [-] -> red
     _log(RED, "-", msg)
 
 
 def warn(msg: str) -> None:
+    # [!] -> yellow
     _log(YELLOW, "!", msg)
 
 
@@ -94,23 +119,23 @@ def error(msg: str) -> None:
 def section(title: str) -> None:
     bar = "═" * (len(title) + 4)
     with _log_lock:
-        sys.stderr.write(f"\n{PURPLE}{BRIGHT}╔{bar}╗{RESET}\n")
-        sys.stderr.write(f"{PURPLE}{BRIGHT}║  {LIGHT_PURPLE}{title}{PURPLE}  ║{RESET}\n")
-        sys.stderr.write(f"{PURPLE}{BRIGHT}╚{bar}╝{RESET}\n")
+        sys.stderr.write(f"\n{NEON_GREEN}{BRIGHT}╔{bar}╗{RESET}\n")
+        sys.stderr.write(f"{NEON_GREEN}{BRIGHT}║  {CYAN}{title}{NEON_GREEN}  ║{RESET}\n")
+        sys.stderr.write(f"{NEON_GREEN}{BRIGHT}╚{bar}╝{RESET}\n")
         sys.stderr.flush()
 
 
 def submodule(title: str) -> None:
     """Smaller header used to mark a sub-step within a module."""
     with _log_lock:
-        sys.stderr.write(f"{DIM}{LIGHT_PURPLE}  -- {title} --{RESET}\n")
+        sys.stderr.write(f"{DIM}{CYAN}  -- {title} --{RESET}\n")
         sys.stderr.flush()
 
 
 # Color-coded result helpers (ASCII glyphs work everywhere)
 def result_found(label: str, detail: str = "") -> None:
     extra = f"  {DIM}{detail}{RESET}" if detail else ""
-    _log(GREEN, "+", f"{BRIGHT}{label}{RESET}{extra}")
+    _log(NEON_GREEN, "+", f"{BRIGHT}{label}{RESET}{extra}")
 
 
 def result_missing(label: str, detail: str = "") -> None:
@@ -174,8 +199,8 @@ class ProgressBar:
             bar = "█" * filled + "░" * (self.width - filled)
             tail = f"  {note}" if note else ""
             sys.stderr.write(
-                f"\r{PURPLE}{BRIGHT}[{self.label}]{RESET} "
-                f"{LIGHT_PURPLE}{bar}{RESET} "
+                f"\r{NEON_GREEN}{BRIGHT}[{self.label}]{RESET} "
+                f"{CYAN}{bar}{RESET} "
                 f"{self.current}/{self.total} ({pct * 100:5.1f}%){tail}     "
             )
             sys.stderr.flush()

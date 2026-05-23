@@ -100,37 +100,81 @@ def render_text(investigation: Investigation) -> str:
 # ---------------------------------------------------------------------------
 
 CSS = """
+/* ============================================================
+   EXO-OSINT cyberpunk theme
+   palette:
+     bg     #000000
+     primary (neon green)   #00ff41   glow 0 0 8px #00ff41
+     header (cyan)          #00cfff   glow 0 0 8px #00cfff
+     danger (red)           #ff003c   glow 0 0 8px #ff003c
+     warning                #ffe600
+     table border           #1a1a1a
+     table header bg        #0d0d0d
+     card bg                #0a0a0a
+   ============================================================ */
 :root[data-theme="dark"] {
-  --bg: #0a0a0f;
-  --bg2: #12121a;
-  --bg3: #1a1a26;
-  --bg4: #221a30;
-  --primary: #9d4edd;
-  --accent: #c77dff;
-  --accent-bright: #e0aaff;
-  --text: #e0e0e0;
-  --text-dim: #9b9bad;
-  --danger: #ff4d6d;
-  --success: #06d6a0;
-  --warning: #ffd166;
-  --border: #2a1a3a;
-  --shadow: rgba(157,78,221,0.25);
+  --bg: #000000;
+  --bg2: #0a0a0a;
+  --bg3: #0d0d0d;
+  --bg4: #111111;
+  --card-bg: #0a0a0a;
+  --table-header-bg: #0d0d0d;
+  --table-border: #1a1a1a;
+
+  --primary: #00ff41;          /* neon green */
+  --primary-glow: 0 0 8px #00ff41;
+  --accent: #00ff41;
+  --accent-bright: #39ff7a;
+
+  --header: #00cfff;            /* cyan */
+  --header-glow: 0 0 8px #00cfff;
+
+  --text: #00ff41;
+  --text-dim: #5a8c5a;
+
+  --danger: #ff003c;            /* red */
+  --danger-glow: 0 0 8px #ff003c;
+  --warning: #ffe600;            /* yellow */
+  --warning-glow: 0 0 8px #ffe600;
+  --orange: #ff6600;
+  --orange-glow: 0 0 8px #ff6600;
+  --success: #00ff41;
+  --grey: #444444;
+
+  --border: #1a1a1a;
+  --shadow: rgba(0,255,65,0.25);
 }
 :root[data-theme="light"] {
-  --bg: #f5f3fa;
+  --bg: #f5f5f5;
   --bg2: #ffffff;
-  --bg3: #faf7ff;
-  --bg4: #f0e8fb;
-  --primary: #7b3eb8;
-  --accent: #9d4edd;
-  --accent-bright: #6a2ca8;
-  --text: #1a1a26;
-  --text-dim: #555566;
-  --danger: #c92347;
-  --success: #018f6a;
-  --warning: #b07a00;
-  --border: #d8c6e9;
-  --shadow: rgba(157,78,221,0.15);
+  --bg3: #f0f0f0;
+  --bg4: #e8e8e8;
+  --card-bg: #ffffff;
+  --table-header-bg: #f0f0f0;
+  --table-border: #d0d0d0;
+
+  --primary: #007a1f;
+  --primary-glow: 0 0 4px rgba(0,122,31,0.4);
+  --accent: #007a1f;
+  --accent-bright: #00a82a;
+
+  --header: #006c8c;
+  --header-glow: 0 0 4px rgba(0,108,140,0.3);
+
+  --text: #1a1a1a;
+  --text-dim: #555555;
+
+  --danger: #c8001f;
+  --danger-glow: 0 0 4px rgba(200,0,31,0.4);
+  --warning: #b08a00;
+  --warning-glow: 0 0 4px rgba(176,138,0,0.4);
+  --orange: #cc5200;
+  --orange-glow: 0 0 4px rgba(204,82,0,0.4);
+  --success: #007a1f;
+  --grey: #888888;
+
+  --border: #d0d0d0;
+  --shadow: rgba(0,122,31,0.15);
 }
 * { box-sizing: border-box; }
 html, body {
@@ -143,8 +187,8 @@ html, body {
 }
 body {
   background:
-    radial-gradient(ellipse at top left, rgba(157,78,221,0.10), transparent 40%),
-    radial-gradient(ellipse at bottom right, rgba(199,125,255,0.06), transparent 50%),
+    radial-gradient(ellipse at top left, rgba(0,255,65,0.08), transparent 40%),
+    radial-gradient(ellipse at bottom right, rgba(0,207,255,0.05), transparent 50%),
     var(--bg);
 }
 
@@ -153,8 +197,9 @@ body {
 aside.sidebar {
   width: 260px;
   flex-shrink: 0;
-  background: var(--bg2);
-  border-right: 1px solid var(--border);
+  background: #000000;
+  border-right: 1px solid var(--primary);
+  box-shadow: inset -1px 0 8px rgba(0,255,65,0.15);
   padding: 22px 12px;
   position: sticky;
   top: 0;
@@ -162,8 +207,8 @@ aside.sidebar {
   overflow-y: auto;
 }
 aside.sidebar h2 {
-  color: var(--accent);
-  text-shadow: 0 0 8px var(--shadow);
+  color: var(--header);
+  text-shadow: var(--header-glow);
   letter-spacing: 3px;
   font-size: 0.95rem;
   margin: 0 0 18px 0;
@@ -173,18 +218,21 @@ aside.sidebar .nav-item {
   display: block;
   padding: 8px 10px;
   margin: 2px 0;
-  border-radius: 4px;
+  border-radius: 0;
   color: var(--text);
   text-decoration: none;
-  border-left: 2px solid transparent;
+  border: 1px solid transparent;
+  border-left: 2px solid var(--primary);
   font-size: 0.84rem;
   transition: all .15s;
   word-break: break-all;
 }
 aside.sidebar .nav-item:hover {
   background: var(--bg3);
-  border-left-color: var(--accent);
-  color: var(--accent);
+  border: 1px solid var(--primary);
+  border-left: 2px solid var(--primary);
+  color: var(--primary);
+  text-shadow: var(--primary-glow);
 }
 aside.sidebar .nav-item .type {
   color: var(--text-dim);
@@ -193,36 +241,39 @@ aside.sidebar .nav-item .type {
 }
 aside.sidebar .nav-item .score {
   float: right;
-  background: var(--bg4);
+  background: #000;
+  border: 1px solid var(--primary);
   padding: 1px 6px;
   border-radius: 999px;
   font-size: 0.7rem;
-  color: var(--accent);
+  color: var(--primary);
 }
 aside.sidebar .toolbox {
   margin-top: 18px;
   padding: 10px;
-  border-top: 1px dashed var(--border);
+  border-top: 1px dashed var(--primary);
 }
 aside.sidebar .tool-btn {
   display: block;
   width: 100%;
   margin: 6px 0;
   padding: 8px;
-  background: var(--bg3);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--accent);
+  background: #000;
+  border: 1px solid var(--primary);
+  border-radius: 0;
+  color: var(--primary);
   font-family: inherit;
   font-size: 0.78rem;
   cursor: pointer;
   letter-spacing: 1px;
+  text-shadow: var(--primary-glow);
   transition: all .15s;
 }
 aside.sidebar .tool-btn:hover {
-  background: var(--accent);
-  color: var(--bg);
-  box-shadow: 0 0 12px var(--shadow);
+  background: var(--primary);
+  color: #000;
+  text-shadow: none;
+  box-shadow: var(--primary-glow);
 }
 
 main.content {
@@ -236,9 +287,9 @@ header.banner {
   text-align: center;
   padding: 22px 16px;
   border: 1px solid var(--primary);
-  border-radius: 8px;
-  background: linear-gradient(180deg, rgba(157,78,221,0.10), rgba(157,78,221,0.02));
-  box-shadow: 0 0 40px var(--shadow), inset 0 0 30px rgba(157,78,221,0.05);
+  border-radius: 0;
+  background: #000;
+  box-shadow: 0 0 24px var(--shadow), inset 0 0 30px rgba(0,255,65,0.05);
   margin-bottom: 24px;
   position: relative;
   overflow: hidden;
@@ -247,7 +298,7 @@ header.banner::before {
   content: "";
   position: absolute; top: 0; left: -100%;
   width: 30%; height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(199,125,255,0.18), transparent);
+  background: linear-gradient(90deg, transparent, rgba(0,255,65,0.18), transparent);
   animation: scan 4s ease-in-out infinite;
   pointer-events: none;
 }
@@ -259,12 +310,20 @@ header.banner::before {
 header.banner pre {
   text-align: left; display: inline-block;
   margin: 0 0 8px 0; font-size: 0.65rem; line-height: 1;
-  color: var(--accent);
-  text-shadow: 0 0 12px var(--shadow);
+  color: var(--primary);
+  text-shadow: var(--primary-glow);
   overflow-x: auto;
 }
+header.banner h1.report-title {
+  color: var(--header);
+  text-shadow: var(--header-glow);
+  letter-spacing: 4px;
+  font-size: 1.4rem;
+  margin: 8px 0 4px 0;
+}
 header.banner .tagline {
-  color: var(--accent);
+  color: var(--header);
+  text-shadow: var(--header-glow);
   font-size: 0.95rem;
   letter-spacing: 2px;
 }
@@ -276,24 +335,38 @@ header.banner .subtag {
 header.banner .meta {
   margin-top: 10px;
   display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;
-  font-size: 0.78rem; color: var(--text-dim);
+  font-size: 0.78rem;
+  color: var(--primary);
+  letter-spacing: 1px;
+}
+header.banner .auth-warning {
+  margin-top: 12px;
+  background: #0d0000;
+  border-left: 3px solid var(--danger);
+  color: var(--danger);
+  text-shadow: var(--danger-glow);
+  padding: 12px 16px;
+  letter-spacing: 1px;
+  font-size: 0.78rem;
+  text-align: left;
+  display: inline-block;
 }
 
 /* Cards */
 section.exec {
   margin: 18px 0 24px 0;
   padding: 20px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg2);
+  border: 1px solid var(--primary);
+  border-radius: 0;
+  background: var(--card-bg);
   box-shadow: 0 0 18px var(--shadow);
 }
 section.exec h2 {
-  color: var(--accent);
+  color: var(--header);
   margin: 0 0 14px 0;
   font-size: 1.1rem;
   letter-spacing: 2px;
-  text-shadow: 0 0 6px var(--shadow);
+  text-shadow: var(--header-glow);
 }
 .cards {
   display: grid;
@@ -302,22 +375,23 @@ section.exec h2 {
   margin-bottom: 18px;
 }
 .card {
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  border: 1px solid var(--primary);
+  border-radius: 0;
   padding: 12px 14px;
-  background: var(--bg3);
+  background: var(--card-bg);
+  box-shadow: inset 0 0 8px rgba(0,255,65,0.05);
 }
 .card .label {
-  color: var(--text-dim);
+  color: var(--header);
   font-size: 0.72rem;
   letter-spacing: 1px;
   text-transform: uppercase;
 }
 .card .value {
-  color: var(--accent);
+  color: var(--primary);
   font-size: 1.5rem;
   margin-top: 4px;
-  text-shadow: 0 0 6px var(--shadow);
+  text-shadow: var(--primary-glow);
 }
 
 /* Map + charts row */
@@ -329,44 +403,48 @@ section.exec h2 {
 }
 @media (max-width: 1100px) { .dashboard-row { grid-template-columns: 1fr; } }
 .panel {
-  border: 1px solid var(--border);
-  background: var(--bg2);
-  border-radius: 8px;
+  border: 1px solid var(--primary);
+  background: var(--card-bg);
+  border-radius: 0;
   padding: 14px 16px;
   min-height: 240px;
+  box-shadow: 0 0 12px var(--shadow);
 }
 .panel h3 {
-  color: var(--accent);
+  color: var(--header);
   font-size: 0.9rem;
   letter-spacing: 2px;
   margin: 0 0 10px 0;
+  text-shadow: var(--header-glow);
 }
-#map { height: 340px; border-radius: 6px; background: #000; }
+#map { height: 340px; border-radius: 0; background: #000; border: 1px solid var(--primary); }
 .chart-wrapper { height: 340px; position: relative; }
 
 /* Targets */
 .target {
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border: 1px solid var(--primary);
+  border-radius: 0;
   margin-bottom: 22px;
-  background: var(--bg2);
+  background: var(--card-bg);
   overflow: hidden;
   scroll-margin-top: 8px;
+  box-shadow: 0 0 12px var(--shadow);
 }
 .target > summary {
   list-style: none;
   cursor: pointer;
   padding: 14px 18px;
-  background: linear-gradient(90deg, rgba(157,78,221,0.18), rgba(157,78,221,0.03));
-  border-bottom: 1px solid var(--border);
+  background: linear-gradient(90deg, rgba(0,255,65,0.10), rgba(0,255,65,0.02));
+  border-bottom: 1px solid var(--primary);
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   flex-wrap: wrap;
 }
 .target > summary::-webkit-details-marker { display: none; }
 .target > summary .title {
-  color: var(--accent);
+  color: var(--header);
   font-size: 1.05rem;
   letter-spacing: 1px;
+  text-shadow: var(--header-glow);
 }
 .target > summary .title .type {
   color: var(--text-dim);
@@ -376,32 +454,35 @@ section.exec h2 {
 .score-bar {
   display: inline-block;
   width: 110px; height: 8px;
-  background: var(--bg4);
+  background: #000;
+  border: 1px solid var(--primary);
   border-radius: 4px; overflow: hidden;
   vertical-align: middle;
   margin-right: 8px;
 }
 .score-bar > span {
   display: block; height: 100%;
-  background: linear-gradient(90deg, var(--success), var(--warning) 60%, var(--danger));
+  background: linear-gradient(90deg, var(--primary), var(--warning) 60%, var(--danger));
+  box-shadow: 0 0 6px var(--primary);
 }
-.score-num { color: var(--accent); margin-right: 6px; }
+.score-num { color: var(--primary); margin-right: 6px; text-shadow: var(--primary-glow); }
 
 .module {
   padding: 14px 18px;
-  border-top: 1px dashed var(--border);
+  border-top: 1px dashed var(--primary);
 }
 .module:first-of-type { border-top: none; }
 .module > summary {
   list-style: none;
   cursor: pointer;
   padding: 6px 0;
-  color: var(--accent);
+  color: var(--header);
   letter-spacing: 1px;
+  text-shadow: var(--header-glow);
 }
 .module > summary::-webkit-details-marker { display: none; }
 .module > summary::before { content: "▸ "; color: var(--primary); }
-.module[open] > summary::before { content: "▾ "; }
+.module[open] > summary::before { content: "▾ "; color: var(--primary); }
 .module .module-summary {
   color: var(--text-dim);
   font-size: 0.78rem;
@@ -410,141 +491,192 @@ section.exec h2 {
 }
 
 /* Findings table */
-table.findings { width: 100%; border-collapse: collapse; margin-top: 8px; }
+table.findings { width: 100%; border-collapse: collapse; margin-top: 8px; background: #000; }
 table.findings th, table.findings td {
   text-align: left;
   padding: 7px 9px;
-  border-bottom: 1px solid var(--border);
+  border: 1px solid var(--table-border);
   vertical-align: top;
   font-size: 0.85rem;
   word-break: break-word;
 }
 table.findings th {
-  color: var(--text-dim);
+  background: var(--table-header-bg);
+  color: var(--header);
+  text-shadow: var(--header-glow);
   text-transform: uppercase;
   letter-spacing: 1px;
   font-size: 0.7rem;
+  border: 1px solid var(--table-border);
 }
-table.findings td.k { color: var(--accent); white-space: nowrap; }
-table.findings td.v { color: var(--text); }
+table.findings td { color: var(--primary); border: 1px solid #111; }
+table.findings tr.found td, table.findings tr.open td { color: var(--primary); font-weight: bold; text-shadow: var(--primary-glow); }
+table.findings tr.notfound td, table.findings tr.closed td { color: var(--danger); }
+table.findings td.k { color: var(--header); white-space: nowrap; text-shadow: var(--header-glow); }
+table.findings td.v { color: var(--primary); }
 table.findings td pre {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
   font-family: inherit;
-  color: var(--text);
+  color: var(--primary);
 }
 table.findings td a {
-  color: var(--accent-bright);
+  color: var(--header);
   text-decoration: none;
-  border-bottom: 1px dashed var(--accent-bright);
+  border-bottom: 1px dashed var(--header);
 }
-table.findings td a:hover { color: var(--accent); }
+table.findings td a:hover { color: var(--primary); border-bottom-color: var(--primary); }
 
 img.avatar {
   width: 28px; height: 28px;
   border-radius: 50%;
   vertical-align: middle;
   margin-right: 6px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--primary);
 }
 img.screenshot {
   max-width: 220px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
+  border: 1px solid var(--primary);
+  border-radius: 0;
   margin-top: 4px;
 }
 
 .copy-btn {
   cursor: pointer;
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--accent);
+  background: #000;
+  border: 1px solid var(--primary);
+  color: var(--primary);
   font-family: inherit;
   font-size: 0.7rem;
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: 0;
   margin-left: 6px;
-  opacity: 0.5;
+  opacity: 0.65;
   transition: all .15s;
 }
-.copy-btn:hover { opacity: 1; background: var(--bg3); }
+.copy-btn:hover {
+  opacity: 1;
+  background: var(--primary);
+  color: #000;
+  box-shadow: var(--primary-glow);
+}
 
+/* Command-style code blocks (used inline anywhere a CLI command appears) */
+pre.cmd, code.cmd, .command-block {
+  background: #0a0a0a;
+  border: 1px solid rgba(0,255,65,0.2);   /* #00ff4133 */
+  border-left: 3px solid var(--primary);
+  color: var(--primary);
+  font-family: 'Share Tech Mono', monospace;
+  padding: 8px 12px;
+  margin: 6px 0;
+  display: block;
+  white-space: pre-wrap;
+  word-break: break-word;
+  text-shadow: var(--primary-glow);
+}
+
+/* Warning box */
+.warning-box {
+  background: #0d0000;
+  border-left: 3px solid var(--danger);
+  color: var(--danger);
+  text-shadow: var(--danger-glow);
+  padding: 12px 16px;
+  letter-spacing: 1px;
+  margin: 8px 0;
+}
+
+/* Severity / risk badges -- cyberpunk glows */
 .badge {
   display: inline-block;
   padding: 2px 9px;
-  border-radius: 999px;
+  border-radius: 0;
   font-size: 0.68rem;
   letter-spacing: 1px;
   text-transform: uppercase;
   border: 1px solid var(--primary);
-  color: var(--accent);
-  background: rgba(157,78,221,0.10);
-  box-shadow: 0 0 8px var(--shadow);
+  color: var(--primary);
+  background: #000;
+  text-shadow: var(--primary-glow);
+  box-shadow: var(--primary-glow);
 }
-.badge.info { border-color: var(--primary); color: var(--accent); }
-.badge.low { border-color: var(--success); color: var(--success); box-shadow: 0 0 8px rgba(6,214,160,0.35); }
-.badge.medium { border-color: var(--warning); color: var(--warning); box-shadow: 0 0 8px rgba(255,209,102,0.35); }
-.badge.high { border-color: var(--danger); color: var(--danger); box-shadow: 0 0 8px rgba(255,77,109,0.40); }
-.badge.critical { border-color: var(--danger); color: #fff; background: var(--danger); box-shadow: 0 0 14px var(--danger); }
+.badge.info       { border-color: var(--primary); color: var(--primary); text-shadow: var(--primary-glow); box-shadow: var(--primary-glow); }
+.badge.low        { border-color: var(--header);  color: var(--header);  text-shadow: var(--header-glow);  box-shadow: var(--header-glow);  }
+.badge.medium     { border-color: var(--warning); color: var(--warning); text-shadow: var(--warning-glow); box-shadow: var(--warning-glow); }
+.badge.high       { border-color: var(--orange);  color: var(--orange);  text-shadow: var(--orange-glow);  box-shadow: var(--orange-glow);  }
+.badge.critical   { border-color: var(--danger);  color: var(--danger);  text-shadow: var(--danger-glow);  box-shadow: var(--danger-glow);  }
+
+/* Found / not-found / unknown / blocked badges */
+.badge.found      { border-color: var(--primary); color: var(--primary); text-shadow: var(--primary-glow); box-shadow: var(--primary-glow); }
+.badge.notfound,
+.badge.not-found  { border-color: var(--danger);  color: var(--danger);  text-shadow: var(--danger-glow);  box-shadow: var(--danger-glow);  }
+.badge.unknown    { border-color: var(--warning); color: var(--warning); text-shadow: var(--warning-glow); box-shadow: var(--warning-glow); }
+.badge.blocked    { border-color: var(--grey);    color: var(--grey);    text-shadow: none;                box-shadow: none; }
 
 .kvpair { color: var(--text-dim); font-size: 0.8rem; }
 
 /* Correlation panel */
 .correlations {
   padding: 12px 18px 18px 18px;
-  border-top: 2px solid var(--border);
-  background: var(--bg3);
+  border-top: 2px solid var(--primary);
+  background: var(--card-bg);
 }
 .correlations h4 {
-  color: var(--accent);
+  color: var(--header);
   font-size: 0.9rem;
   letter-spacing: 1px;
   margin: 0 0 10px 0;
+  text-shadow: var(--header-glow);
 }
 .corr-link {
   display: inline-block;
   margin: 4px 6px 4px 0;
   padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--bg2);
+  border: 1px solid var(--primary);
+  border-radius: 0;
+  background: #000;
   font-size: 0.78rem;
+  color: var(--primary);
+  text-decoration: none;
 }
 .corr-link.confirmed {
-  border-color: var(--success);
-  color: var(--success);
-  box-shadow: 0 0 6px rgba(6,214,160,0.3);
+  border-color: var(--primary);
+  color: var(--primary);
+  text-shadow: var(--primary-glow);
+  box-shadow: var(--primary-glow);
 }
 .corr-link .ctype {
-  color: var(--text-dim);
+  color: var(--header);
   font-size: 0.7rem;
   text-transform: uppercase;
   margin-right: 6px;
+  text-shadow: var(--header-glow);
 }
 
 /* Timeline */
 .timeline {
   margin-top: 10px;
   padding: 8px 14px 8px 30px;
-  border-left: 2px dashed var(--border);
+  border-left: 2px dashed var(--primary);
   font-size: 0.78rem;
 }
 .timeline .row { color: var(--text-dim); margin: 3px 0; }
-.timeline .row b { color: var(--accent); }
+.timeline .row b { color: var(--primary); text-shadow: var(--primary-glow); }
 
 footer.foot {
   margin-top: 36px;
   text-align: center;
   color: var(--text-dim);
   font-size: 0.78rem;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--primary);
   padding-top: 18px;
 }
 
 @media (max-width: 800px) {
   .layout { flex-direction: column; }
-  aside.sidebar { width: 100%; height: auto; position: static; border-right: none; border-bottom: 1px solid var(--border); }
+  aside.sidebar { width: 100%; height: auto; position: static; border-right: none; border-bottom: 1px solid var(--primary); }
   main.content { padding: 18px; }
 }
 """
@@ -644,12 +776,15 @@ JS = """
     }).addTo(map);
     if (points.length === 0) {
       map.setView([20, 0], 2);
-      L.marker([20, 0]).bindPopup('No IP geolocation in this report').addTo(map);
+      L.circleMarker([20, 0], {
+        radius: 9, color: '#00ff41', fillColor: '#00ff41',
+        fillOpacity: 0.7, weight: 2
+      }).bindPopup('No IP geolocation in this report').addTo(map);
     } else {
       const group = L.featureGroup();
       points.forEach(p => {
         const m = L.circleMarker([p.lat, p.lon], {
-          radius: 9, color: '#c77dff', fillColor: '#9d4edd',
+          radius: 9, color: '#00ff41', fillColor: '#00ff41',
           fillOpacity: 0.7, weight: 2
         });
         m.bindPopup('<b>' + p.target + '</b><br>' + p.info + '<br>' + p.isp);
@@ -672,13 +807,14 @@ JS = """
           labels: ['info', 'low', 'medium', 'high', 'critical'],
           datasets: [{
             data: [sev.info||0, sev.low||0, sev.medium||0, sev.high||0, sev.critical||0],
-            backgroundColor: ['#9d4edd','#06d6a0','#ffd166','#ff7e8b','#ff4d6d'],
-            borderColor: '#0a0a0f', borderWidth: 1
+            // info=green, low=cyan, medium=yellow, high=orange, critical=red
+            backgroundColor: ['#00ff41','#00cfff','#ffe600','#ff6600','#ff003c'],
+            borderColor: '#000000', borderWidth: 1
           }]
         },
         options: {
           plugins: {
-            legend: { position: 'bottom', labels: { color: '#c77dff' } },
+            legend: { position: 'bottom', labels: { color: '#00cfff' } },
             title: { display: false }
           },
           responsive: true, maintainAspectRatio: false
@@ -695,8 +831,8 @@ JS = """
           datasets: [{
             label: 'Footprint Score',
             data: targets.map(t => t.footprint_score || 0),
-            backgroundColor: '#9d4edd',
-            borderColor: '#c77dff',
+            backgroundColor: '#00ff41',
+            borderColor: '#00cfff',
             borderWidth: 1
           }]
         },
@@ -704,12 +840,12 @@ JS = """
           indexAxis: 'y',
           scales: {
             x: { suggestedMin: 0, suggestedMax: 100,
-                 ticks: { color: '#c77dff' },
-                 grid:  { color: 'rgba(157,78,221,0.15)' } },
-            y: { ticks: { color: '#c77dff' }, grid: { display: false } }
+                 ticks: { color: '#00cfff' },
+                 grid:  { color: 'rgba(0,255,65,0.15)' } },
+            y: { ticks: { color: '#00cfff' }, grid: { display: false } }
           },
           plugins: {
-            legend: { display: false }
+            legend: { display: false, labels: { color: '#00cfff' } }
           },
           responsive: true, maintainAspectRatio: false
         }
@@ -954,6 +1090,9 @@ def write_html(investigation: Investigation, path: str) -> str:
     generated = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
     embedded = _safe_json_for_script(investigation.to_dict())
 
+    # Build target list string for header
+    target_list = ", ".join(t.target for t in investigation.targets) or "—"
+
     html_doc = f"""<!doctype html>
 <html lang="en" data-theme="dark">
 <head>
@@ -972,14 +1111,17 @@ def write_html(investigation: Investigation, path: str) -> str:
   <main class="content">
     <header class="banner">
       <pre>{html.escape(BANNER_TXT)}</pre>
+      <h1 class="report-title">EXO-OSINT &mdash; Intelligence Report</h1>
       <div class="tagline">[ Open Source Intelligence Framework ]</div>
       <div class="subtag">// Authorized intelligence gathering only</div>
       <div class="meta">
-        <span>v{html.escape(investigation.version)}</span>
-        <span>generated {html.escape(generated)}</span>
-        <span>started {html.escape(investigation.started_at)}</span>
-        <span>finished {html.escape(investigation.finished_at)}</span>
+        <span>Generated: {html.escape(generated)}</span>
+        <span>&middot;</span>
+        <span>Target: {html.escape(target_list)}</span>
+        <span>&middot;</span>
+        <span>Engine v{html.escape(investigation.version)}</span>
       </div>
+      <div class="auth-warning">// AUTHORIZED USE ONLY</div>
     </header>
 
     {summary_html}
@@ -1006,7 +1148,7 @@ def write_html(investigation: Investigation, path: str) -> str:
 
     <footer class="foot">
       EXO-OSINT v{html.escape(investigation.version)} &middot; rendered {html.escape(generated)} &middot;
-      authorized intelligence gathering only
+      // AUTHORIZED USE ONLY
     </footer>
   </main>
 </div>
