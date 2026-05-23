@@ -49,12 +49,17 @@ The tool is designed for authorized security research, threat intelligence, digi
 - Parked / alive status
 
 ### Email Investigation (`email`)
-- Format validation
-- MX record verification
-- Disposable email detection
-- Email provider identification
-- SMTP mailbox verification (best-effort)
-- HaveIBeenPwned breach check (optional API key)
+- Format validation, MX verification, disposable detection, provider fingerprint
+- SMTP mailbox verification with multi-MX fallback and catch-all detection
+- Gravatar avatar + profile JSON (display name, location, linked accounts)
+- LeakCheck public breach search (free, no key)
+- Pastebin via psbdmp.ws (paste IDs + URLs, free)
+- GitHub user search by email (unauthenticated)
+- Web mentions via DuckDuckGo HTML scrape
+- Pre-built search URL hints (Google, Bing, LinkedIn, GitHub commits, Twitter)
+- Hunter.io domain intel (`HUNTER_API_KEY`)
+- EmailRep.io reputation (`EMAILREP_API_KEY`)
+- HaveIBeenPwned breach list (`HIBP_API_KEY`)
 - Auto-runs domain recon on the email's domain
 
 ### Username Hunting (`username`)
@@ -131,8 +136,10 @@ python exoosint.py --targets-file targets.txt --report html,json --save
 EXO-OSINT works without API keys. To enable enriched data, export:
 
 ```bash
-export ABUSEIPDB_API_KEY="your-key-here"
-export HIBP_API_KEY="your-key-here"
+export ABUSEIPDB_API_KEY="your-key-here"   # IP abuse score
+export HIBP_API_KEY="your-key-here"        # HaveIBeenPwned breach list
+export HUNTER_API_KEY="your-key-here"      # Hunter.io domain intel (25 free/mo)
+export EMAILREP_API_KEY="your-key-here"    # EmailRep.io reputation
 ```
 
 ## Design Principles

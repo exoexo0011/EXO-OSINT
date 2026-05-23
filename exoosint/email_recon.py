@@ -1,12 +1,30 @@
-"""Email investigation module."""
+"""Email investigation module — multi-source OSINT with graceful degradation.
+
+Sources used (all optional, gracefully degrade if unavailable):
+  - DNS MX records                                          (free)
+  - SMTP probe with multi-MX fallback + catch-all detect    (free, may be blocked)
+  - Disposable email list                                   (free, local)
+  - Provider fingerprint                                    (free, local)
+  - Gravatar avatar + profile JSON                          (free, no key)
+  - LeakCheck public breach search                          (free, no key)
+  - Pastebin via psbdmp.ws                                  (free, no key)
+  - GitHub user search by email                             (free, rate-limited)
+  - Web mentions via DuckDuckGo HTML                        (free, no key)
+  - LinkedIn / GitHub search URL hints                      (free, link only)
+  - Hunter.io domain search                                 (HUNTER_API_KEY)
+  - EmailRep.io reputation                                  (EMAILREP_API_KEY)
+  - HaveIBeenPwned breach list                              (HIBP_API_KEY)
+"""
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import smtplib
 import socket
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote_plus
 
 import requests
 
@@ -16,8 +34,15 @@ from .types import ModuleResult
 
 EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
 
+DEFAULT_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0 Safari/537.36 EXO-OSINT/1.0"
+    ),
+    "Accept-Language": "en-US,en;q=0.9",
+}
 
-# Compact list of common disposable email domains (extend as needed)
+
 DISPOSABLE_DOMAINS = {
     "10minutemail.com", "guerrillamail.com", "mailinator.com", "tempmail.com",
     "temp-mail.org", "yopmail.com", "throwawaymail.com", "trashmail.com",
@@ -56,40 +81,526 @@ PROVIDERS = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Validation & local checks
+# ---------------------------------------------------------------------------
+
 def is_valid_email(value: str) -> bool:
     return bool(EMAIL_RE.match(value or ""))
 
 
-def _mx_records(domain: str, timeout: int) -> List[str]:
+def _md5(value: str) -> str:
+    return hashlib.md5(value.strip().lower().encode("utf-8")).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# DNS / MX
+# ---------------------------------------------------------------------------
+
+def _mx_records(domain: str, timeout: int) -> List[Tuple[int, str]]:
+    """Return list of (priority, host) sorted by priority ascending."""
     try:
         import dns.resolver
         resolver = dns.resolver.Resolver()
         resolver.timeout = timeout
         resolver.lifetime = timeout
         answers = resolver.resolve(domain, "MX")
-        return sorted([str(r.exchange).rstrip(".") for r in answers])
+        out = [(int(r.preference), str(r.exchange).rstrip(".")) for r in answers]
+        out.sort(key=lambda x: x[0])
+        return out
     except Exception as exc:
         ui.warn(f"mx lookup failed for {domain}: {exc}")
         return []
 
 
-def _smtp_verify(email: str, mx: str, timeout: int) -> Optional[Dict[str, Any]]:
-    """Best-effort SMTP probe. Many servers mask responses, so result is informational."""
+# ---------------------------------------------------------------------------
+# SMTP — multi-MX fallback + catch-all detection
+# ---------------------------------------------------------------------------
+
+def _smtp_probe_one(mx: str, port: int, sender: str, recipients: List[str], timeout: int) -> Dict[str, Any]:
+    """Probe one MX server. Returns a dict with per-recipient response codes."""
+    result: Dict[str, Any] = {
+        "mx": mx,
+        "port": port,
+        "connected": False,
+        "banner": None,
+        "responses": {},  # recipient -> {code, message}
+        "error": None,
+    }
+    srv: Optional[smtplib.SMTP] = None
     try:
         socket.setdefaulttimeout(timeout)
         srv = smtplib.SMTP(timeout=timeout)
-        srv.connect(mx, 25)
-        srv.helo("exo-osint.local")
-        srv.mail("noreply@exo-osint.local")
-        code, msg = srv.rcpt(email)
-        srv.quit()
-        msg_text = msg.decode("utf-8", "ignore") if isinstance(msg, bytes) else str(msg)
-        return {"code": code, "message": msg_text, "deliverable": code in (250, 251)}
-    except Exception as exc:
-        return {"error": str(exc), "deliverable": None}
-    finally:
-        socket.setdefaulttimeout(None)
+        code, banner = srv.connect(mx, port)
+        result["connected"] = True
+        result["banner"] = (banner.decode("utf-8", "ignore") if isinstance(banner, bytes) else str(banner))[:200]
 
+        # Try EHLO first (modern), fall back to HELO
+        try:
+            srv.ehlo("exo-osint.local")
+        except Exception:
+            srv.helo("exo-osint.local")
+
+        try:
+            srv.mail(sender)
+        except Exception as exc:
+            result["error"] = f"MAIL FROM rejected: {exc}"
+            return result
+
+        for r in recipients:
+            try:
+                code, msg = srv.rcpt(r)
+                msg_text = msg.decode("utf-8", "ignore") if isinstance(msg, bytes) else str(msg)
+                result["responses"][r] = {
+                    "code": int(code),
+                    "message": msg_text[:200],
+                    "deliverable": int(code) in (250, 251),
+                }
+            except Exception as exc:
+                result["responses"][r] = {"code": None, "message": str(exc)[:200], "deliverable": None}
+    except (socket.timeout, TimeoutError):
+        result["error"] = "timeout"
+    except ConnectionRefusedError:
+        result["error"] = "connection_refused"
+    except OSError as exc:
+        # errno 101 / 111 / etc. — usually means outbound port 25 is blocked
+        result["error"] = f"network_error: {exc}"
+    except smtplib.SMTPException as exc:
+        result["error"] = f"smtp_error: {exc}"
+    except Exception as exc:
+        result["error"] = f"unexpected: {exc}"
+    finally:
+        if srv is not None:
+            try:
+                srv.quit()
+            except Exception:
+                try:
+                    srv.close()
+                except Exception:
+                    pass
+        socket.setdefaulttimeout(None)
+    return result
+
+
+def _smtp_verify(email: str, mx_records: List[Tuple[int, str]], timeout: int) -> Dict[str, Any]:
+    """Robust SMTP verification with multi-MX fallback and catch-all detection.
+
+    Strategy:
+      1. Iterate MX servers in priority order.
+      2. For each, probe the real address AND a guaranteed-fake address
+         (random local-part) on the same server in one session.
+      3. Stop on the first server that gives a definitive answer.
+      4. If real == deliverable AND fake == deliverable -> catch-all (inconclusive).
+    """
+    if not mx_records:
+        return {"deliverable": None, "error": "no MX records"}
+
+    domain = email.split("@", 1)[1]
+    fake_local = "exo-osint-noreply-" + hashlib.md5(email.encode()).hexdigest()[:10]
+    fake_email = f"{fake_local}@{domain}"
+    sender = "noreply@exo-osint.local"
+
+    last_error: Optional[str] = None
+    attempts: List[Dict[str, Any]] = []
+
+    for prio, mx in mx_records[:3]:  # try top 3 MX
+        # Most public mail servers use port 25 for inbound. 587 requires auth.
+        probe = _smtp_probe_one(mx, 25, sender, [email, fake_email], timeout=timeout)
+        attempts.append(probe)
+        if probe.get("error"):
+            last_error = probe["error"]
+            continue
+        responses = probe.get("responses", {})
+        real_resp = responses.get(email, {})
+        fake_resp = responses.get(fake_email, {})
+        real_d = real_resp.get("deliverable")
+        fake_d = fake_resp.get("deliverable")
+
+        if real_d is True and fake_d is True:
+            return {
+                "deliverable": None,
+                "catch_all": True,
+                "real_response": real_resp,
+                "fake_response": fake_resp,
+                "mx_used": mx,
+                "mx_priority": prio,
+                "attempts": attempts,
+                "note": "server accepts every recipient (catch-all) — verification inconclusive",
+            }
+        if real_d is True:
+            return {
+                "deliverable": True,
+                "catch_all": False,
+                "real_response": real_resp,
+                "fake_response": fake_resp,
+                "mx_used": mx,
+                "mx_priority": prio,
+                "attempts": attempts,
+            }
+        if real_d is False:
+            return {
+                "deliverable": False,
+                "catch_all": False,
+                "real_response": real_resp,
+                "fake_response": fake_resp,
+                "mx_used": mx,
+                "mx_priority": prio,
+                "attempts": attempts,
+            }
+        # ambiguous (None) — keep trying next MX
+
+    return {
+        "deliverable": None,
+        "error": last_error or "all MX servers gave ambiguous responses",
+        "attempts": attempts,
+        "note": "outbound port 25 may be blocked from this network",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Gravatar
+# ---------------------------------------------------------------------------
+
+def _gravatar(email: str, timeout: int) -> Optional[Dict[str, Any]]:
+    digest = _md5(email)
+    avatar_url = f"https://www.gravatar.com/avatar/{digest}"
+    profile_json = f"https://www.gravatar.com/{digest}.json"
+    out: Dict[str, Any] = {"avatar_hash": digest, "exists": False}
+    try:
+        r = requests.get(
+            f"{avatar_url}?d=404",
+            headers=DEFAULT_HEADERS,
+            timeout=timeout,
+            allow_redirects=False,
+        )
+        out["exists"] = r.status_code == 200
+        out["avatar_url"] = avatar_url if out["exists"] else None
+    except Exception as exc:
+        ui.warn(f"gravatar avatar check failed: {exc}")
+        return None
+
+    if out["exists"]:
+        # Try to fetch profile JSON (may be empty if profile not configured)
+        try:
+            r = requests.get(profile_json, headers=DEFAULT_HEADERS, timeout=timeout)
+            if r.status_code == 200 and r.text.strip().startswith("{"):
+                data = r.json() or {}
+                entries = data.get("entry", [])
+                if entries:
+                    e = entries[0]
+                    out["profile"] = {
+                        "display_name": e.get("displayName"),
+                        "preferred_username": e.get("preferredUsername"),
+                        "name": e.get("name"),
+                        "about_me": e.get("aboutMe"),
+                        "current_location": e.get("currentLocation"),
+                        "profile_url": e.get("profileUrl"),
+                        "accounts": e.get("accounts", []),
+                        "urls": e.get("urls", []),
+                    }
+        except Exception:
+            pass
+    return out
+
+
+# ---------------------------------------------------------------------------
+# LeakCheck public — free, no key
+# ---------------------------------------------------------------------------
+
+def _leakcheck_public(email: str, timeout: int) -> Optional[Dict[str, Any]]:
+    try:
+        r = requests.get(
+            "https://leakcheck.io/api/public",
+            params={"check": email},
+            headers=DEFAULT_HEADERS,
+            timeout=timeout,
+        )
+        if r.status_code != 200:
+            return None
+        data = r.json() or {}
+        if not data.get("success"):
+            return {"found": 0, "sources": [], "fields": []}
+        return {
+            "found": int(data.get("found", 0)),
+            "fields": data.get("fields", []) or [],
+            "sources": data.get("sources", []) or [],
+        }
+    except Exception as exc:
+        ui.warn(f"leakcheck failed: {exc}")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Pastebin via psbdmp.ws — free, no key
+# ---------------------------------------------------------------------------
+
+def _psbdmp_pastebin(email: str, timeout: int) -> Optional[Dict[str, Any]]:
+    try:
+        r = requests.get(
+            f"https://psbdmp.ws/api/search/{quote_plus(email)}",
+            headers=DEFAULT_HEADERS,
+            timeout=timeout,
+        )
+        if r.status_code != 200:
+            return None
+        text = r.text.strip()
+        if not text:
+            return {"count": 0, "pastes": []}
+        try:
+            data = r.json()
+        except ValueError:
+            return {"count": 0, "pastes": []}
+        if isinstance(data, dict):
+            count = int(data.get("count", 0))
+            pastes = data.get("data", []) or []
+        elif isinstance(data, list):
+            count = len(data)
+            pastes = data
+        else:
+            return {"count": 0, "pastes": []}
+        # Build pastebin URLs from IDs
+        paste_urls: List[Dict[str, Any]] = []
+        for p in pastes[:25]:
+            if isinstance(p, dict) and p.get("id"):
+                paste_urls.append({
+                    "id": p.get("id"),
+                    "url": f"https://pastebin.com/{p.get('id')}",
+                    "date": p.get("date"),
+                })
+        return {"count": count, "pastes": paste_urls}
+    except Exception as exc:
+        ui.warn(f"psbdmp pastebin failed: {exc}")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# GitHub email search (unauthenticated, rate-limited)
+# ---------------------------------------------------------------------------
+
+def _github_email_search(email: str, timeout: int) -> Optional[Dict[str, Any]]:
+    try:
+        r = requests.get(
+            "https://api.github.com/search/users",
+            params={"q": f"{email} in:email"},
+            headers={**DEFAULT_HEADERS, "Accept": "application/vnd.github+json"},
+            timeout=timeout,
+        )
+        if r.status_code == 403:
+            return {"rate_limited": True, "users": []}
+        if r.status_code != 200:
+            return None
+        data = r.json() or {}
+        users: List[Dict[str, Any]] = []
+        for u in (data.get("items") or [])[:10]:
+            users.append({
+                "login": u.get("login"),
+                "url": u.get("html_url"),
+                "avatar": u.get("avatar_url"),
+            })
+        return {"total": int(data.get("total_count", 0)), "users": users}
+    except Exception as exc:
+        ui.warn(f"github email search failed: {exc}")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Web mentions via DuckDuckGo HTML scrape
+# ---------------------------------------------------------------------------
+
+def _web_mentions(email: str, timeout: int, max_results: int = 10) -> Optional[Dict[str, Any]]:
+    try:
+        from bs4 import BeautifulSoup  # type: ignore
+    except Exception:
+        return None
+    query = f'"{email}"'
+    # Try a few endpoints; some get challenged with anti-bot pages, fall through to next.
+    endpoints = [
+        ("POST", "https://html.duckduckgo.com/html/", {"q": query, "kl": "us-en"}),
+        ("GET", "https://html.duckduckgo.com/html/", {"q": query, "kl": "us-en"}),
+        ("GET", "https://lite.duckduckgo.com/lite/", {"q": query}),
+    ]
+    headers = {
+        **DEFAULT_HEADERS,
+        "Referer": "https://html.duckduckgo.com/",
+        "Origin": "https://html.duckduckgo.com",
+    }
+    last_status: Optional[int] = None
+    for method, url, params in endpoints:
+        try:
+            if method == "POST":
+                r = requests.post(url, data=params, headers=headers, timeout=timeout)
+            else:
+                r = requests.get(url, params=params, headers=headers, timeout=timeout)
+            last_status = r.status_code
+        except Exception:
+            continue
+        if r.status_code != 200:
+            continue
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        results: List[Dict[str, str]] = []
+        seen_urls = set()
+
+        # html.duckduckgo.com format
+        for a in soup.select("a.result__a"):
+            href = a.get("href", "")
+            title = a.get_text(strip=True)
+            if not href or not title:
+                continue
+            real = _ddg_unwrap(href)
+            if not real or real in seen_urls:
+                continue
+            seen_urls.add(real)
+            results.append({"title": title[:200], "url": real})
+            if len(results) >= max_results:
+                break
+
+        # lite.duckduckgo.com format — anchors inside <table>
+        if not results:
+            for a in soup.select("a.result-link, td.result-snippet a, a[rel='noopener']"):
+                href = a.get("href", "")
+                title = a.get_text(strip=True)
+                if not href or not title or href.startswith("/"):
+                    continue
+                real = _ddg_unwrap(href) or href
+                if not real.startswith("http") or real in seen_urls:
+                    continue
+                seen_urls.add(real)
+                results.append({"title": title[:200], "url": real})
+                if len(results) >= max_results:
+                    break
+
+        if results:
+            return {
+                "query": query,
+                "engine": "duckduckgo",
+                "endpoint": url,
+                "count": len(results),
+                "results": results,
+            }
+    # Anti-bot or no hits — surface the empty result so caller can record state
+    return {
+        "query": query,
+        "engine": "duckduckgo",
+        "count": 0,
+        "results": [],
+        "blocked": last_status == 202,
+        "last_status": last_status,
+    }
+
+
+def _ddg_unwrap(href: str) -> Optional[str]:
+    if href.startswith("//duckduckgo.com/l/"):
+        href = "https:" + href
+    if "duckduckgo.com/l/" in href:
+        from urllib.parse import urlparse, parse_qs, unquote
+        q = parse_qs(urlparse(href).query)
+        if "uddg" in q:
+            return unquote(q["uddg"][0])
+        return None
+    if href.startswith("http"):
+        return href
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Hunter.io (HUNTER_API_KEY)
+# ---------------------------------------------------------------------------
+
+def _hunter_domain(domain: str, timeout: int) -> Optional[Dict[str, Any]]:
+    api_key = os.environ.get("HUNTER_API_KEY")
+    if not api_key:
+        return None
+    try:
+        r = requests.get(
+            "https://api.hunter.io/v2/domain-search",
+            params={"domain": domain, "api_key": api_key, "limit": 10},
+            headers=DEFAULT_HEADERS,
+            timeout=timeout,
+        )
+        if r.status_code != 200:
+            return None
+        data = (r.json() or {}).get("data") or {}
+        emails = data.get("emails", []) or []
+        return {
+            "organization": data.get("organization"),
+            "country": data.get("country"),
+            "pattern": data.get("pattern"),
+            "technologies": data.get("technologies", []),
+            "linkedin": data.get("linkedin"),
+            "twitter": data.get("twitter"),
+            "facebook": data.get("facebook"),
+            "email_count": len(emails),
+            "emails": [
+                {
+                    "value": e.get("value"),
+                    "first_name": e.get("first_name"),
+                    "last_name": e.get("last_name"),
+                    "position": e.get("position"),
+                    "department": e.get("department"),
+                    "confidence": e.get("confidence"),
+                    "sources_count": len(e.get("sources", [])),
+                }
+                for e in emails[:10]
+            ],
+        }
+    except Exception as exc:
+        ui.warn(f"hunter.io failed: {exc}")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# EmailRep.io (EMAILREP_API_KEY — free tier disabled by vendor)
+# ---------------------------------------------------------------------------
+
+def _emailrep(email: str, timeout: int) -> Optional[Dict[str, Any]]:
+    headers = {**DEFAULT_HEADERS, "Accept": "application/json"}
+    api_key = os.environ.get("EMAILREP_API_KEY")
+    if api_key:
+        headers["Key"] = api_key
+    try:
+        r = requests.get(
+            f"https://emailrep.io/{quote_plus(email)}",
+            headers=headers,
+            timeout=timeout,
+        )
+        if r.status_code == 401 or r.status_code == 403:
+            return {"unavailable": True, "reason": "API key required"}
+        if r.status_code == 429:
+            return {"unavailable": True, "reason": "rate limited"}
+        if r.status_code != 200:
+            return None
+        data = r.json() or {}
+        if data.get("status") == "fail":
+            return {"unavailable": True, "reason": data.get("reason")}
+        details = data.get("details") or {}
+        return {
+            "email": data.get("email"),
+            "reputation": data.get("reputation"),
+            "suspicious": data.get("suspicious"),
+            "references": data.get("references"),
+            "blacklisted": details.get("blacklisted"),
+            "malicious_activity": details.get("malicious_activity"),
+            "credentials_leaked": details.get("credentials_leaked"),
+            "data_breach": details.get("data_breach"),
+            "first_seen": details.get("first_seen"),
+            "last_seen": details.get("last_seen"),
+            "domain_age_days": details.get("domain_age"),
+            "deliverable": details.get("deliverable"),
+            "valid_mx": details.get("valid_mx"),
+            "spam": details.get("spam"),
+            "free_provider": details.get("free_provider"),
+            "disposable": details.get("disposable"),
+            "profiles": details.get("profiles", []) or [],
+        }
+    except Exception as exc:
+        ui.warn(f"emailrep failed: {exc}")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# HIBP (HIBP_API_KEY)
+# ---------------------------------------------------------------------------
 
 def _hibp_breaches(email: str, timeout: int) -> Optional[List[Dict[str, Any]]]:
     api_key = os.environ.get("HIBP_API_KEY")
@@ -97,7 +608,7 @@ def _hibp_breaches(email: str, timeout: int) -> Optional[List[Dict[str, Any]]]:
         return None
     try:
         r = requests.get(
-            f"https://haveibeenpwned.com/api/v3/breachedaccount/{email}",
+            f"https://haveibeenpwned.com/api/v3/breachedaccount/{quote_plus(email)}",
             params={"truncateResponse": "false"},
             headers={
                 "hibp-api-key": api_key,
@@ -114,7 +625,32 @@ def _hibp_breaches(email: str, timeout: int) -> Optional[List[Dict[str, Any]]]:
     return None
 
 
-def run(email: str, timeout: int = 10, run_domain_recon: bool = True, threads: int = 20) -> ModuleResult:
+# ---------------------------------------------------------------------------
+# Search URL hints (always free, link-only)
+# ---------------------------------------------------------------------------
+
+def _search_hints(email: str) -> Dict[str, str]:
+    q = quote_plus(f'"{email}"')
+    return {
+        "google": f"https://www.google.com/search?q={q}",
+        "bing": f"https://www.bing.com/search?q={q}",
+        "duckduckgo": f"https://duckduckgo.com/?q={q}",
+        "linkedin": f"https://www.google.com/search?q={q}+site%3Alinkedin.com",
+        "github": f"https://github.com/search?q={q}&type=commits",
+        "twitter": f"https://www.google.com/search?q={q}+site%3Atwitter.com+OR+site%3Ax.com",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator
+# ---------------------------------------------------------------------------
+
+def run(
+    email: str,
+    timeout: int = 10,
+    run_domain_recon: bool = True,
+    threads: int = 20,
+) -> ModuleResult:
     res = ModuleResult(module="email", target=email, target_type="email")
 
     if not is_valid_email(email):
@@ -128,12 +664,9 @@ def run(email: str, timeout: int = 10, run_domain_recon: bool = True, threads: i
     res.data["local_part"] = local
     res.data["domain"] = domain
 
-    # Provider
+    # Provider fingerprint
     provider = PROVIDERS.get(domain)
-    if provider:
-        res.add("provider", provider, source="signature")
-    else:
-        res.add("provider", "Custom / Self-hosted", source="signature")
+    res.add("provider", provider or "Custom / Self-hosted", source="signature")
 
     # Disposable
     disposable = domain in DISPOSABLE_DOMAINS
@@ -143,51 +676,213 @@ def run(email: str, timeout: int = 10, run_domain_recon: bool = True, threads: i
     else:
         res.add("disposable", False, source="static_list")
 
-    # MX
+    # MX records
     ui.info(f"Checking MX records for {domain}...")
     mx = _mx_records(domain, timeout)
     if mx:
-        res.data["mx_records"] = mx
-        res.add("mx_records", mx, source="dns")
-        res.add("can_receive_mail", True, source="dns")
+        mx_strings = [f"{prio} {host}" for prio, host in mx if host]
+        # Filter out RFC 7505 "null MX" (0 .) and empty hosts
+        mx_active = [(p, h) for p, h in mx if h and h != "."]
+        res.data["mx_records"] = mx_strings
+        if mx_strings:
+            res.add("mx_records", mx_strings, source="dns")
+        if mx_active:
+            res.add("can_receive_mail", True, source="dns")
+        else:
+            res.add("can_receive_mail", False, severity="medium", source="dns",
+                    note="domain has null MX (RFC 7505) — does not accept mail")
+            mx = []  # don't try SMTP probe
     else:
         res.add("can_receive_mail", False, severity="medium", source="dns",
                 note="domain has no MX records")
 
-    # SMTP probe (only if we have MX, optional)
+    # SMTP probe with multi-MX fallback + catch-all detection
     if mx:
-        ui.info("SMTP probe (best-effort)...")
-        smtp_result = _smtp_verify(email, mx[0], timeout=min(timeout, 8))
+        ui.info("SMTP probe (multi-MX fallback)...")
+        smtp_result = _smtp_verify(email, mx, timeout=min(timeout, 8))
         res.data["smtp"] = smtp_result
         if smtp_result.get("deliverable") is True:
             res.add("smtp_deliverable", True, source="smtp",
-                    note=f"server accepted RCPT (code {smtp_result.get('code')})")
+                    note=f"server {smtp_result.get('mx_used')} accepted RCPT")
         elif smtp_result.get("deliverable") is False:
             res.add("smtp_deliverable", False, severity="low", source="smtp",
-                    note=f"server rejected RCPT (code {smtp_result.get('code')})")
+                    note=f"server {smtp_result.get('mx_used')} rejected RCPT")
+        elif smtp_result.get("catch_all"):
+            res.add("smtp_deliverable", "catch_all", severity="info", source="smtp",
+                    note="server is a catch-all — verification inconclusive")
+        else:
+            res.add("smtp_deliverable", "unavailable", source="smtp",
+                    note=smtp_result.get("error") or smtp_result.get("note") or "ambiguous")
 
-    # HIBP breach check
+    # Gravatar
+    ui.info("Gravatar lookup...")
+    grav = _gravatar(email, timeout)
+    if grav:
+        res.data["gravatar"] = grav
+        if grav.get("exists"):
+            res.add("gravatar", True, severity="info", source="gravatar.com",
+                    note=grav.get("avatar_url") or "")
+            prof = grav.get("profile") or {}
+            for k in ("display_name", "preferred_username", "current_location"):
+                if prof.get(k):
+                    res.add(f"gravatar_{k}", prof[k], source="gravatar.com")
+            if prof.get("accounts"):
+                accts = [
+                    {"shortname": a.get("shortname"), "url": a.get("url")}
+                    for a in prof["accounts"] if isinstance(a, dict)
+                ]
+                if accts:
+                    res.add("gravatar_linked_accounts", accts, severity="medium",
+                            source="gravatar.com",
+                            note=f"{len(accts)} linked social profile(s)")
+
+    # LeakCheck public
+    ui.info("LeakCheck breach search...")
+    lc = _leakcheck_public(email, timeout)
+    if lc is not None:
+        res.data["leakcheck"] = lc
+        if lc.get("found", 0) > 0:
+            count = lc["found"]
+            sev = "critical" if count >= 50 else ("high" if count >= 5 else "medium")
+            sources = [s.get("name", "?") for s in (lc.get("sources") or [])[:10] if isinstance(s, dict)]
+            res.add("leakcheck_breaches", count, severity=sev, source="leakcheck.io",
+                    note=", ".join(sources) if sources else "")
+            if lc.get("fields"):
+                res.add("leaked_fields", lc["fields"], severity="high", source="leakcheck.io")
+        else:
+            res.add("leakcheck_breaches", 0, source="leakcheck.io")
+
+    # Pastebin via psbdmp.ws
+    ui.info("Pastebin search...")
+    psb = _psbdmp_pastebin(email, timeout)
+    if psb is not None:
+        res.data["pastebin"] = psb
+        if psb.get("count", 0) > 0:
+            sev = "high" if psb["count"] >= 5 else "medium"
+            res.add("pastebin_appearances", psb["count"], severity=sev,
+                    source="psbdmp.ws",
+                    note=f"appears in {psb['count']} paste(s)")
+            for p in (psb.get("pastes") or [])[:5]:
+                res.add(f"paste_{p.get('id')}", p.get("url"), severity="medium",
+                        source="psbdmp.ws", note=p.get("date") or "")
+        else:
+            res.add("pastebin_appearances", 0, source="psbdmp.ws")
+
+    # GitHub search
+    ui.info("GitHub email search...")
+    gh = _github_email_search(email, timeout)
+    if gh is not None:
+        res.data["github"] = gh
+        if gh.get("rate_limited"):
+            res.add("github_search", "rate_limited", source="api.github.com",
+                    note="unauthenticated GitHub search rate limit hit")
+        elif gh.get("total", 0) > 0:
+            res.add("github_users_found", gh["total"], severity="medium",
+                    source="api.github.com",
+                    note=f"{gh['total']} GitHub user(s) match this email")
+            for u in (gh.get("users") or [])[:5]:
+                res.add(f"github_user_{u.get('login')}", u.get("url"),
+                        severity="medium", source="api.github.com")
+        else:
+            res.add("github_users_found", 0, source="api.github.com")
+
+    # Web mentions (DuckDuckGo)
+    ui.info("Web mentions (DuckDuckGo)...")
+    web = _web_mentions(email, timeout)
+    if web is not None:
+        res.data["web_mentions"] = web
+        if web.get("count", 0) > 0:
+            sev = "medium" if web["count"] >= 3 else "low"
+            res.add("web_mentions_count", web["count"], severity=sev,
+                    source="duckduckgo.com",
+                    note=f"{web['count']} public web mention(s) found")
+            for m in (web.get("results") or [])[:5]:
+                res.add(f"web_mention", m.get("url"), severity="info",
+                        source="duckduckgo.com", note=m.get("title", "")[:120])
+        elif web.get("blocked"):
+            res.add("web_mentions_count", "blocked", source="duckduckgo.com",
+                    note="search engine challenged the request — use search_urls below for manual review")
+        else:
+            res.add("web_mentions_count", 0, source="duckduckgo.com")
+
+    # Hunter.io domain search
+    ui.info("Hunter.io domain search...")
+    hunter = _hunter_domain(domain, timeout)
+    if hunter is None:
+        if not os.environ.get("HUNTER_API_KEY"):
+            res.add("hunter_io", "unavailable", note="set HUNTER_API_KEY for domain intel")
+    else:
+        res.data["hunter_io"] = hunter
+        if hunter.get("organization"):
+            res.add("hunter_organization", hunter["organization"], source="hunter.io")
+        if hunter.get("pattern"):
+            res.add("hunter_email_pattern", hunter["pattern"], source="hunter.io",
+                    note="common email format used by this organization")
+        if hunter.get("email_count", 0) > 0:
+            res.add("hunter_emails_known", hunter["email_count"], severity="low",
+                    source="hunter.io",
+                    note=f"{hunter['email_count']} email(s) on hunter.io")
+        for net in ("linkedin", "twitter", "facebook"):
+            if hunter.get(net):
+                res.add(f"hunter_{net}", hunter[net], source="hunter.io")
+
+    # EmailRep.io
+    ui.info("EmailRep reputation...")
+    rep = _emailrep(email, timeout)
+    if rep is None:
+        if not os.environ.get("EMAILREP_API_KEY"):
+            res.add("emailrep", "unavailable", note="set EMAILREP_API_KEY for reputation data")
+    elif rep.get("unavailable"):
+        res.add("emailrep", "unavailable", note=rep.get("reason", ""))
+    else:
+        res.data["emailrep"] = rep
+        if rep.get("suspicious"):
+            res.add("emailrep_suspicious", True, severity="high", source="emailrep.io")
+        if rep.get("blacklisted"):
+            res.add("emailrep_blacklisted", True, severity="high", source="emailrep.io")
+        if rep.get("malicious_activity"):
+            res.add("emailrep_malicious", True, severity="critical", source="emailrep.io")
+        if rep.get("credentials_leaked"):
+            res.add("emailrep_credentials_leaked", True, severity="high", source="emailrep.io")
+        if rep.get("data_breach"):
+            res.add("emailrep_data_breach", True, severity="high", source="emailrep.io")
+        if rep.get("reputation"):
+            res.add("emailrep_reputation", rep["reputation"], source="emailrep.io")
+        if rep.get("references") is not None:
+            res.add("emailrep_references", rep["references"], source="emailrep.io",
+                    note="number of public references seen")
+        profiles = rep.get("profiles") or []
+        if profiles:
+            res.add("emailrep_profiles", profiles, severity="medium", source="emailrep.io",
+                    note=f"{len(profiles)} linked profile(s)")
+
+    # HIBP (paid)
     breaches = _hibp_breaches(email, timeout)
     if breaches is None:
         if not os.environ.get("HIBP_API_KEY"):
-            res.add("breaches", "unavailable", note="set HIBP_API_KEY for breach data")
+            res.add("hibp_breaches", "unavailable", note="set HIBP_API_KEY for breach data")
     else:
-        res.data["breaches"] = breaches
+        res.data["hibp_breaches"] = breaches
         if breaches:
             sev = "critical" if len(breaches) >= 5 else "high"
-            res.add("breaches_found", len(breaches), severity=sev, source="haveibeenpwned",
+            res.add("hibp_breaches_found", len(breaches), severity=sev,
+                    source="haveibeenpwned",
                     note=", ".join(b.get("Name", "?") for b in breaches[:5]))
         else:
-            res.add("breaches_found", 0, source="haveibeenpwned")
+            res.add("hibp_breaches_found", 0, source="haveibeenpwned")
 
-    # Domain recon
+    # Always-on search URL hints
+    res.data["search_urls"] = _search_hints(email)
+    res.add("search_urls", _search_hints(email), source="exo-osint",
+            note="ready-to-use search URLs for manual review")
+
+    # Optional follow-up domain recon
     if run_domain_recon:
         try:
             from . import domain as domain_mod
             ui.info(f"Running domain recon on {domain}...")
             dom_res = domain_mod.run(domain, timeout=timeout, threads=threads)
             res.data["domain_recon"] = dom_res.to_dict()
-            # surface high-value findings up
             for f in dom_res.findings:
                 if f.severity in ("high", "critical"):
                     res.add(f"domain.{f.key}", f.value, severity=f.severity,
