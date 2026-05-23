@@ -1,9 +1,11 @@
-"""Terminal UI: banner, colors, thread-safe progress bar."""
+"""Terminal UI: banner, colors, thread-safe progress bar, stealth delay."""
 
 from __future__ import annotations
 
+import random
 import sys
 import threading
+import time
 from typing import Optional
 
 try:
@@ -25,6 +27,7 @@ except Exception:  # pragma: no cover
 PURPLE = Fore.MAGENTA
 LIGHT_PURPLE = Fore.LIGHTMAGENTA_EX
 TEAL = Fore.LIGHTCYAN_EX
+GREEN = Fore.LIGHTGREEN_EX
 RED = Fore.LIGHTRED_EX
 YELLOW = Fore.LIGHTYELLOW_EX
 WHITE = Fore.LIGHTWHITE_EX
@@ -46,7 +49,7 @@ TAGLINE = "[ Open Source Intelligence Framework ]"
 SUBTAGLINE = "// Authorized intelligence gathering only"
 
 
-def print_banner(version: str = "1.0.0", stream=None) -> None:
+def print_banner(version: str = "2.0.0", stream=None) -> None:
     stream = stream or sys.stderr
     stream.write(f"{PURPLE}{BRIGHT}{BANNER}{RESET}\n")
     stream.write(f"{LIGHT_PURPLE}{BRIGHT}             {TAGLINE}{RESET}\n")
@@ -73,7 +76,7 @@ def info(msg: str) -> None:
 
 
 def found(msg: str) -> None:
-    _log(TEAL, "+", msg)
+    _log(GREEN, "+", msg)
 
 
 def miss(msg: str) -> None:
@@ -95,6 +98,55 @@ def section(title: str) -> None:
         sys.stderr.write(f"{PURPLE}{BRIGHT}║  {LIGHT_PURPLE}{title}{PURPLE}  ║{RESET}\n")
         sys.stderr.write(f"{PURPLE}{BRIGHT}╚{bar}╝{RESET}\n")
         sys.stderr.flush()
+
+
+def submodule(title: str) -> None:
+    """Smaller header used to mark a sub-step within a module."""
+    with _log_lock:
+        sys.stderr.write(f"{DIM}{LIGHT_PURPLE}  -- {title} --{RESET}\n")
+        sys.stderr.flush()
+
+
+# Color-coded result helpers (ASCII glyphs work everywhere)
+def result_found(label: str, detail: str = "") -> None:
+    extra = f"  {DIM}{detail}{RESET}" if detail else ""
+    _log(GREEN, "+", f"{BRIGHT}{label}{RESET}{extra}")
+
+
+def result_missing(label: str, detail: str = "") -> None:
+    extra = f"  {DIM}{detail}{RESET}" if detail else ""
+    _log(RED, "-", f"{label}{extra}")
+
+
+def result_unknown(label: str, detail: str = "") -> None:
+    extra = f"  {DIM}{detail}{RESET}" if detail else ""
+    _log(YELLOW, "?", f"{label}{extra}")
+
+
+# ---------------------------------------------------------------------------
+# Stealth: optional random delay between external requests
+# ---------------------------------------------------------------------------
+
+_STEALTH = False
+_STEALTH_MIN = 0.3
+_STEALTH_MAX = 1.5
+
+
+def set_stealth(enabled: bool, min_seconds: float = 0.3, max_seconds: float = 1.5) -> None:
+    global _STEALTH, _STEALTH_MIN, _STEALTH_MAX
+    _STEALTH = bool(enabled)
+    _STEALTH_MIN = float(min_seconds)
+    _STEALTH_MAX = float(max_seconds)
+
+
+def stealth_sleep() -> None:
+    """Sleep a random short duration if stealth mode is active."""
+    if _STEALTH:
+        time.sleep(random.uniform(_STEALTH_MIN, _STEALTH_MAX))
+
+
+def is_stealth() -> bool:
+    return _STEALTH
 
 
 # ---------------------------------------------------------------------------
