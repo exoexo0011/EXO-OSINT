@@ -12,7 +12,6 @@ from typing import List, Optional
 
 from . import __version__, ui
 from . import correlation as corr_mod
-from . import dating_recon as dating_mod
 from . import domain as domain_mod
 from . import email_recon as email_mod
 from . import ip as ip_mod
@@ -68,7 +67,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--type", choices=VALID_TYPES, help="Force target type (auto-detect if omitted)")
     p.add_argument("--targets-file", help="File with list of targets (one per line, # for comments)")
     p.add_argument("--modules", default="all",
-                   help="Comma-separated modules: ip,domain,email,username,phone,dating,correlation,all")
+                   help="Comma-separated modules: ip,domain,email,username,phone,correlation,all")
     p.add_argument("--username-platforms", default="",
                    help="Comma-separated platform names to limit username hunt")
     p.add_argument("--report", default="",
@@ -89,11 +88,6 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Insert random delays between external requests")
     p.add_argument("--investigate", action="store_true",
                    help="Mega flag: run every relevant module + correlation + html+json + save")
-    p.add_argument("--dating", action="store_true",
-                   help="Run dating & matrimonial recon (email or phone targets only)")
-    p.add_argument("--dating-categories", nargs="+",
-                   choices=["dating", "indian", "hookup", "lgbtq", "chat"],
-                   help="Limit dating recon to specific categories")
     p.add_argument("--no-correlation", action="store_true",
                    help="Disable the correlation engine even with --investigate")
     return p
@@ -180,29 +174,6 @@ def _run_target(target: str, args: argparse.Namespace) -> TargetReport:
         m = ModuleResult(module=ttype, target=target, target_type=ttype)
         m.finish(success=False, error=str(exc))
         tr.modules.append(m)
-
-    # ---------- Dating recon (opt-in: --dating or --investigate, email/phone only) ----------
-    run_dating = (args.dating or args.investigate) and ttype in ("email", "phone")
-    # If user explicitly asked for "dating" via --modules, also run it
-    if "dating" in modules:
-        run_dating = run_dating or ttype in ("email", "phone")
-
-    if run_dating:
-        ui.section("DATING & MATRIMONIAL RECON")
-        try:
-            dating_result = dating_mod.run(
-                target=target,
-                target_type=ttype,
-                timeout=args.timeout,
-                categories=args.dating_categories,
-                stealth=args.stealth,
-            )
-            tr.modules.append(dating_result)
-        except Exception as exc:
-            ui.error(f"dating recon crashed: {exc}")
-            m = ModuleResult(module="dating", target=target, target_type=ttype)
-            m.finish(success=False, error=str(exc))
-            tr.modules.append(m)
 
     # ---------- Verdict line ----------
     risk = tr.risk_level()

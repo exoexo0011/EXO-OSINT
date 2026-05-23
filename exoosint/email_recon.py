@@ -54,46 +54,6 @@ DISPOSABLE_DOMAINS = {
 }
 
 
-# Known dating / adult / matrimonial breaches.
-# Matched (case-insensitive substring) against breach names returned by HIBP
-# and LeakCheck so the analyst sees a *real* OSINT signal — sourced from
-# public breach data, not from any account-enumeration attempt.
-DATING_BREACH_PATTERNS: List[str] = [
-    "ashleymadison", "ashley madison", "alm",  # Avid Life Media (parent)
-    "adultfriendfinder", "adult friend finder", "friend finder networks", "ffn",
-    "meetmindful", "beautifulpeople", "beautiful people",
-    "brazzers", "cams.com", "fling", "mate1", "naughtyamerica",
-    "okcupid", "plenty of fish", "pof.com", "zoosk",
-    "stripshow", "stripchat", "snapcheat",
-    "youporn", "penthouse", "wearehairy",
-    "muslimmatch", "shaadi", "jeevansathi", "bharatmatrimony",
-    "tinder", "bumble", "hinge", "grindr", "feeld",
-    "xhamster", "pornhub", "redtube",
-]
-
-
-def _match_dating_breaches(names: List[str]) -> List[str]:
-    """Return the subset of `names` that match known dating/adult breach
-    patterns. Case-insensitive substring match."""
-    matches: List[str] = []
-    for n in names:
-        if not n:
-            continue
-        n_lower = str(n).lower()
-        for pat in DATING_BREACH_PATTERNS:
-            if pat in n_lower:
-                matches.append(str(n))
-                break
-    # de-dupe while preserving order
-    seen: set = set()
-    out: List[str] = []
-    for m in matches:
-        if m not in seen:
-            seen.add(m)
-            out.append(m)
-    return out
-
-
 PROVIDERS = {
     "gmail.com": "Google Gmail",
     "googlemail.com": "Google Gmail",
@@ -739,7 +699,6 @@ def run(
 
     ui.info("LeakCheck breach search...")
     lc = _leakcheck_public(email, timeout)
-    dating_breach_hits: List[str] = []
     if lc is not None:
         res.data["leakcheck"] = lc
         if lc.get("found", 0) > 0:
@@ -750,14 +709,6 @@ def run(
                     note=", ".join(sources) if sources else "")
             if lc.get("fields"):
                 res.add("leaked_fields", lc["fields"], severity="high", source="leakcheck.io")
-            # Dating-specific breach match (real OSINT signal — public breach data)
-            all_source_names = [s.get("name", "") for s in (lc.get("sources") or []) if isinstance(s, dict)]
-            dating_hits = _match_dating_breaches(all_source_names)
-            if dating_hits:
-                dating_breach_hits.extend(dating_hits)
-                res.add("dating_breach_match_leakcheck", dating_hits,
-                        severity="high", source="leakcheck.io",
-                        note=f"email appears in {len(dating_hits)} known dating/adult breach corpus(es)")
         else:
             res.add("leakcheck_breaches", 0, source="leakcheck.io")
 
@@ -887,25 +838,8 @@ def run(
             res.add("hibp_breaches_found", len(breaches), severity=sev,
                     source="haveibeenpwned",
                     note=", ".join(b.get("Name", "?") for b in breaches[:5]))
-            # Dating-specific breach match
-            hibp_names = [b.get("Name", "") for b in breaches if isinstance(b, dict)]
-            hibp_dating = _match_dating_breaches(hibp_names)
-            if hibp_dating:
-                dating_breach_hits.extend(hibp_dating)
-                res.add("dating_breach_match_hibp", hibp_dating,
-                        severity="high", source="haveibeenpwned",
-                        note=f"email appears in {len(hibp_dating)} known dating/adult breach(es)")
         else:
             res.add("hibp_breaches_found", 0, source="haveibeenpwned")
-
-    # Aggregate dating-breach signal
-    if dating_breach_hits:
-        # de-dupe
-        unique_hits = list(dict.fromkeys(dating_breach_hits))
-        res.data["dating_breach_hits"] = unique_hits
-        res.add("dating_breach_total", len(unique_hits),
-                severity="high", source="breach-correlation",
-                note="; ".join(unique_hits[:8]))
 
     # Search URL hints (always)
     hints = _search_hints(email)
