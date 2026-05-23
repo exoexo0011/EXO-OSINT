@@ -547,6 +547,127 @@ footer.foot {
   aside.sidebar { width: 100%; height: auto; position: static; border-right: none; border-bottom: 1px solid var(--border); }
   main.content { padding: 18px; }
 }
+
+/* ============================================================ */
+/* Dating Footprint section                                     */
+/* ============================================================ */
+.dt-section {
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(255,77,109,0.08), rgba(157,78,221,0.04));
+  border-radius: 8px;
+  padding: 14px 18px 18px 18px;
+  margin: 14px 0 6px 0;
+}
+.dt-section > summary { list-style: none; cursor: pointer; }
+.dt-section > summary::-webkit-details-marker { display: none; }
+.dt-summary {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 12px; flex-wrap: wrap;
+}
+.dt-title {
+  color: var(--accent-bright);
+  font-size: 1.05rem;
+  letter-spacing: 2px;
+  text-shadow: 0 0 8px var(--shadow);
+}
+.dt-count-summary { color: var(--text-dim); font-size: 0.78rem; }
+.dt-legend {
+  display: flex; gap: 14px; flex-wrap: wrap;
+  margin: 10px 0 14px 0;
+  padding: 6px 10px;
+  background: var(--bg2);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  font-size: 0.74rem;
+}
+.dt-leg.low { color: var(--success); }
+.dt-leg.medium { color: var(--warning); }
+.dt-leg.high { color: var(--danger); }
+
+.dt-group { margin-top: 14px; }
+.dt-group-title {
+  font-size: 0.78rem; letter-spacing: 2px;
+  margin: 0 0 8px 0;
+  padding-left: 8px;
+  border-left: 3px solid var(--accent);
+}
+.dt-group-title.low { border-left-color: var(--success); color: var(--success); }
+.dt-group-title.medium { border-left-color: var(--warning); color: var(--warning); }
+.dt-group-title.high { border-left-color: var(--danger); color: var(--danger); }
+.dt-count { color: var(--text-dim); font-weight: normal; }
+
+.dt-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+}
+.dt {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  text-decoration: none;
+  transition: all .12s;
+}
+.dt:hover { transform: translateY(-1px); }
+.dt-icon {
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: bold; font-size: 0.85rem;
+  flex-shrink: 0;
+}
+.dt-body { display: flex; flex-direction: column; min-width: 0; }
+.dt-body b { color: var(--text); font-size: 0.85rem; word-break: break-word; }
+.dt-sub { color: var(--text-dim); font-size: 0.7rem; }
+
+.dt.confirmed {
+  border-color: var(--success);
+  background: rgba(6,214,160,0.10);
+  box-shadow: 0 0 8px rgba(6,214,160,0.25);
+}
+.dt.confirmed:hover { box-shadow: 0 0 14px rgba(6,214,160,0.45); }
+.dt.confirmed .dt-icon { background: var(--success); color: #000; }
+.dt.confirmed b { color: var(--success); }
+
+.dt.low {
+  border-color: rgba(6,214,160,0.4);
+}
+.dt.low .dt-icon { background: var(--success); color: #000; opacity: 0.8; }
+
+.dt.medium { border-color: rgba(255,209,102,0.5); }
+.dt.medium .dt-icon { background: var(--warning); color: #000; }
+.dt.medium:hover { box-shadow: 0 0 10px rgba(255,209,102,0.35); }
+
+.dt.high { border-color: rgba(255,77,109,0.5); }
+.dt.high .dt-icon { background: var(--danger); color: #fff; }
+.dt.high:hover { box-shadow: 0 0 10px rgba(255,77,109,0.45); }
+
+.dt-breach {
+  background: rgba(255,77,109,0.08);
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  padding: 12px 14px;
+  box-shadow: 0 0 12px rgba(255,77,109,0.20);
+}
+.dt-breach-note {
+  color: var(--text);
+  font-size: 0.82rem;
+  margin-bottom: 10px;
+}
+.dt-breach-chips {
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+.dt-breach-chip {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 0.74rem;
+  letter-spacing: 1px;
+  text-shadow: 0 0 6px rgba(0,0,0,0.4);
+}
 """
 
 JS = """
@@ -857,10 +978,155 @@ def _timeline_section(t: TargetReport) -> str:
     """
 
 
+def _dating_footprint_section(t: TargetReport) -> str:
+    """Render the 💕 Dating Footprint panel for a target.
+
+    Pulls data from the `dating` module and from any dating-breach matches
+    surfaced by `email_recon`. Three-state color coding:
+        red    -> high stigma (hookup, LGBTQ+) OR confirmed breach hit
+        yellow -> mainstream dating / matrimonial
+        green  -> chat-adjacent (Telegram, Reddit) + confirmed public profile
+    """
+    dating_mod: Optional[ModuleResult] = None
+    email_mod: Optional[ModuleResult] = None
+    for m in t.modules:
+        if m.module == "dating":
+            dating_mod = m
+        elif m.module == "email":
+            email_mod = m
+
+    if not dating_mod and not (email_mod and email_mod.data.get("dating_breach_hits")):
+        return ""
+
+    # ---- Tile data ----
+    by_cat: Dict[str, List[Dict[str, Any]]] = (dating_mod.data.get("search_urls") if dating_mod else {}) or {}
+    public_profiles: Dict[str, Any] = (dating_mod.data.get("public_profiles") if dating_mod else {}) or {}
+    breach_hits: List[str] = (email_mod.data.get("dating_breach_hits") if email_mod else []) or []
+
+    cat_meta = [
+        ("hookup",     "high",   "Hookup / Casual"),
+        ("lgbtq",      "high",   "LGBTQ+ Networks"),
+        ("dating",     "medium", "Mainstream Dating"),
+        ("matrimonial","medium", "Matrimonial"),
+        ("chat",       "low",    "Chat-Adjacent"),
+    ]
+
+    panels: List[str] = []
+    total_links = 0
+
+    # ---- Confirmed public-profile hits (green) ----
+    confirmed_tiles: List[str] = []
+    tg = public_profiles.get("telegram") or {}
+    if tg.get("exists"):
+        url = html.escape(tg.get("url") or "")
+        name = html.escape(tg.get("display_name") or "")
+        confirmed_tiles.append(
+            f'<a class="dt confirmed" href="{url}" target="_blank" rel="noopener">'
+            f'<span class="dt-icon">✓</span>'
+            f'<span class="dt-body"><b>Telegram</b><span class="dt-sub">{name or "public handle exists"}</span></span>'
+            f'</a>'
+        )
+    rd = public_profiles.get("reddit") or {}
+    if rd.get("exists"):
+        url = html.escape(rd.get("url") or "")
+        karma = (rd.get("comment_karma") or 0) + (rd.get("link_karma") or 0)
+        confirmed_tiles.append(
+            f'<a class="dt confirmed" href="{url}" target="_blank" rel="noopener">'
+            f'<span class="dt-icon">✓</span>'
+            f'<span class="dt-body"><b>Reddit</b><span class="dt-sub">karma {karma}</span></span>'
+            f'</a>'
+        )
+    wa = public_profiles.get("whatsapp") or {}
+    if wa.get("reachable"):
+        url = html.escape(wa.get("url") or "")
+        confirmed_tiles.append(
+            f'<a class="dt confirmed" href="{url}" target="_blank" rel="noopener">'
+            f'<span class="dt-icon">✓</span>'
+            f'<span class="dt-body"><b>WhatsApp</b><span class="dt-sub">wa.me reachable</span></span>'
+            f'</a>'
+        )
+    if confirmed_tiles:
+        panels.append(
+            '<div class="dt-group">'
+            '<h5 class="dt-group-title low">// CONFIRMED PUBLIC PRESENCE</h5>'
+            f'<div class="dt-grid">{"".join(confirmed_tiles)}</div>'
+            '</div>'
+        )
+
+    # ---- Breach match panel (red) ----
+    if breach_hits:
+        chips = "".join(
+            f'<span class="dt-breach-chip">{html.escape(b)}</span>'
+            for b in breach_hits[:20]
+        )
+        panels.append(
+            '<div class="dt-group">'
+            '<h5 class="dt-group-title high">// DATING / ADULT BREACH MATCHES</h5>'
+            '<div class="dt-breach">'
+            '<div class="dt-breach-note">Email present in known dating/adult breach corpora '
+            '(public breach data via HIBP / LeakCheck). This is a strong real-world signal — '
+            'not an account-enumeration claim.</div>'
+            f'<div class="dt-breach-chips">{chips}</div>'
+            '</div>'
+            '</div>'
+        )
+
+    # ---- Curated review URL tiles per category ----
+    for cat_key, tier, title in cat_meta:
+        items = by_cat.get(cat_key) or []
+        if not items:
+            continue
+        tiles = []
+        for it in items:
+            url = html.escape(it.get("url") or "")
+            name = html.escape(it.get("platform") or "")
+            tiles.append(
+                f'<a class="dt {tier}" href="{url}" target="_blank" rel="noopener">'
+                f'<span class="dt-icon">?</span>'
+                f'<span class="dt-body"><b>{name}</b><span class="dt-sub">manual review</span></span>'
+                f'</a>'
+            )
+        total_links += len(tiles)
+        panels.append(
+            f'<div class="dt-group">'
+            f'<h5 class="dt-group-title {tier}">// {html.escape(title.upper())}'
+            f' <span class="dt-count">({len(tiles)})</span></h5>'
+            f'<div class="dt-grid">{"".join(tiles)}</div>'
+            f'</div>'
+        )
+
+    if not panels:
+        return ""
+
+    legend = (
+        '<div class="dt-legend">'
+        '<span class="dt-leg low">● confirmed public</span>'
+        '<span class="dt-leg medium">● mainstream</span>'
+        '<span class="dt-leg high">● high-stigma / breach</span>'
+        '</div>'
+    )
+
+    return f"""
+    <details class="dt-section" open>
+      <summary class="dt-summary">
+        <span class="dt-title">💕 DATING FOOTPRINT</span>
+        <span class="dt-count-summary">
+          {len(breach_hits)} breach hit(s) · {sum(1 for v in public_profiles.values() if isinstance(v, dict) and (v.get("exists") or v.get("reachable")))} public profile(s) · {total_links} review link(s)
+        </span>
+      </summary>
+      {legend}
+      {''.join(panels)}
+    </details>
+    """
+
+
 def _target_section(t: TargetReport) -> str:
     risk = t.risk_level()
     score = t.footprint_score()
-    modules_html = "".join(_module_section(m) for m in t.modules if m.module != "correlation")
+    modules_html = "".join(
+        _module_section(m) for m in t.modules
+        if m.module not in ("correlation", "dating")
+    )
     corr_module_html = "".join(_module_section(m) for m in t.modules if m.module == "correlation")
     return f"""
     <details class="target" id="target-{html.escape(t.target)}" open>
@@ -875,6 +1141,7 @@ def _target_section(t: TargetReport) -> str:
       {modules_html}
       {corr_module_html}
       {_correlations_section(t)}
+      {_dating_footprint_section(t)}
       {_timeline_section(t)}
     </details>
     """
