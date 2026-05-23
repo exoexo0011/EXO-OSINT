@@ -229,31 +229,3 @@ def correlate(
         tr.modules.append(mod)
         out_results.append(mod)
     return out_results
-
-
-# ====================== DATING RECON INTEGRATION ======================
-def add_dating_findings(dating_data: Dict, target_report: TargetReport):
-    """Add discovered dating/matrimonial profiles to correlation engine"""
-    if not dating_data:
-        return
-
-    found_count = 0
-    for platform, info in dating_data.items():
-        if isinstance(info, dict) and info.get("status") == "registered":
-            found_count += 1
-            profile_url = info.get("profile_url") or f"https://{platform.lower().replace(' ', '').replace('.com','')}.com"
-            link = CorrelationLink(
-                seed_target=target_report.target,
-                seed_type=target_report.target_type,
-                derived_value=platform,
-                derived_type="dating_profile",
-                confidence="high",
-                confirmed=True,
-                source="dating_recon",
-                note=f"Account found on {platform}",
-                profile_url=profile_url,
-            )
-            target_report.correlations.append(link)
-
-    if found_count > 0:
-        ui.result_found("DATING", f"Found on {found_count} dating/matrimonial platform(s)")
