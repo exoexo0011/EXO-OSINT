@@ -21,6 +21,7 @@
 
 ## What's New in 2.0
 
+- **Interactive TUI menu** — run `python exoosint.py` with no arguments to launch a `rich`-powered menu with a live findings dashboard. No command memorisation, no flags, beginner-friendly.
 - **`--investigate` mega flag** — runs every relevant module + correlation engine + saves HTML/JSON reports in one command.
 - **OSINT Correlation Engine** — derives related identifiers (email→username, domain→common emails, username→candidate emails, IP→reverse DNS) and confirms them with lightweight checks (Gravatar, DNS, MX, top-platform username probes).
 - **85+ username platforms** organized into 11 categories (coding, social, professional, content, creative, gaming, content-creator, finance, adult, hacking, learning) with per-category risk highlights.
@@ -104,12 +105,87 @@ cd EXO-OSINT
 pip install -r requirements.txt
 ```
 
-## Usage
+## Quickstart
+
+EXO-OSINT ships with two equally first-class ways to run an investigation.
+Pick whichever fits the moment — **no command memorisation required**.
 
 ```bash
-# Interactive menu (no arguments) — beautiful TUI, no flags to memorise
+# 1. Interactive  (recommended for beginners)
+#    Beautiful TUI menu, no flags, walks you through everything.
 python exoosint.py
 
+# 2. CLI  (for advanced users / scripting / automation)
+#    Single command, mega flag, fully reproducible.
+python exoosint.py --target google.com --investigate
+```
+
+> **No flags to remember.** Just run `python exoosint.py` and the menu
+> guides you target → module → depth → report → results, then auto-opens
+> the HTML report in your browser. Drop into the CLI any time you want
+> the exact same flow as a one-liner.
+
+## Interactive Mode
+
+Running `python exoosint.py` with **no arguments** launches a
+`rich`-powered TUI menu — the fastest way to start an investigation
+without memorising a single flag.
+
+```
+╔══════════════════════════════════════════════════╗
+║           EXO OSINT v2.0.0                       ║
+║    [ Open Source Intelligence Framework ]        ║
+╠══════════════════════════════════════════════════╣
+║  [1]  IP Investigation    — geo, ASN, abuse      ║
+║  [2]  Domain Recon        — WHOIS, DNS, SSL      ║
+║  [3]  Email Investigation — breach, reputation   ║
+║  [4]  Username Hunt       — 85+ platforms        ║
+║  [5]  Phone Lookup        — carrier, format      ║
+║  [6]  Full Investigation  — all modules          ║
+║  [7]  Batch Scan          — multiple targets     ║
+║  [Q]  Quit                                       ║
+╚══════════════════════════════════════════════════╝
+```
+
+**The interactive flow**
+
+1. **Pick a module** (1–7) or `[6] Full Investigation` to let EXO-OSINT
+   auto-detect the target type for you.
+2. **Type the target** — IP, domain, email, username, or phone number.
+   Examples are shown right above the prompt.
+3. **Confirm the plan** — type, modules to run, depth, stealth toggle,
+   correlation toggle, and report destination are summarised before
+   anything is sent over the wire.
+4. **Watch the live dashboard** while the investigation runs:
+   - progress bar with elapsed time
+   - **live findings table** that fills in as results stream back
+   - **live log panel** with the latest probe activity
+   - colour-coded by severity — green = found, cyan = info, yellow =
+     warning, red = high risk
+5. **Read the summary** — total findings, risk level, footprint score
+   (0-100), correlations, plus the **top 3 most interesting findings**
+   highlighted on screen.
+6. **Pick a follow-up action** — investigate again, switch target, open
+   the HTML report in your browser (auto-opens by default), or re-run
+   the correlation engine. Quit any time with `Q`.
+
+**Per-module extras**
+
+- **`[4] Username Hunt`** — choose depth (Fast 20 / Standard 50 / Deep
+  85+ platforms) and category filter (All / Social / Gaming /
+  Professional / Creative).
+- **`[6] Full Investigation`** — choose depth (Basic / Standard / Deep),
+  toggle stealth mode (random delays), toggle the correlation engine,
+  and pick report formats (HTML / JSON / CSV / All / None).
+- **`[7] Batch Scan`** — load targets from a file *or* type them one by
+  one and finish with `done`. Generates one combined report.
+
+The interactive flow runs the **same engine** as the CLI — your reports
+land in the same `exo_reports/` folder and contain the same data.
+
+## CLI Mode (advanced)
+
+```bash
 # Show help
 python exoosint.py --help
 
@@ -129,18 +205,6 @@ python exoosint.py --target target.com --investigate --depth 3
 # Bulk
 python exoosint.py --targets-file targets.txt --investigate
 ```
-
-### Interactive Menu (no arguments)
-
-Running `python exoosint.py` with no flags drops you into a `rich`-powered
-TUI with a live investigation dashboard:
-
-- Pick a module (IP, Domain, Email, Username, Phone, Full, Batch)
-- Type the target (auto-detect confirms the type)
-- Watch findings stream into a colour-coded live table while logs scroll below
-- Read the post-run summary, get the top 3 most interesting findings,
-  optionally re-investigate, open the HTML report in your browser, or
-  re-run the correlation engine — all without typing a flag.
 
 ## CLI Reference
 
