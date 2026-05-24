@@ -107,6 +107,9 @@ pip install -r requirements.txt
 ## Usage
 
 ```bash
+# Interactive menu (no arguments) — beautiful TUI, no flags to memorise
+python exoosint.py
+
 # Show help
 python exoosint.py --help
 
@@ -126,6 +129,18 @@ python exoosint.py --target target.com --investigate --depth 3
 # Bulk
 python exoosint.py --targets-file targets.txt --investigate
 ```
+
+### Interactive Menu (no arguments)
+
+Running `python exoosint.py` with no flags drops you into a `rich`-powered
+TUI with a live investigation dashboard:
+
+- Pick a module (IP, Domain, Email, Username, Phone, Full, Batch)
+- Type the target (auto-detect confirms the type)
+- Watch findings stream into a colour-coded live table while logs scroll below
+- Read the post-run summary, get the top 3 most interesting findings,
+  optionally re-investigate, open the HTML report in your browser, or
+  re-run the correlation engine — all without typing a flag.
 
 ## CLI Reference
 
