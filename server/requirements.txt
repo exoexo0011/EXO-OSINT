@@ -1,0 +1,7 @@
+# EXO-OSINT API backend dependencies (Phase 1).
+# Installs the core engine requirements plus the web layer.
+-r ../requirements.txt
+
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+pydantic>=2.6.0
