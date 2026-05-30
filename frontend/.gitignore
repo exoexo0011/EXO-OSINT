@@ -21,3 +21,9 @@ pnpm-debug.log*
 .idea/
 .DS_Store
 *.swp
+
+# The repository root .gitignore ignores any `lib/` directory (a Python build
+# convention). Our React source lives in src/lib/, so re-include it here —
+# otherwise frontend/src/lib/results.js gets silently dropped from commits.
+!src/lib/
+!src/lib/**
