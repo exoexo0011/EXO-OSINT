@@ -1,0 +1,23 @@
+# Render Blueprint for the EXO-OSINT FastAPI backend.
+# Spec: https://render.com/docs/blueprint-spec
+#
+# Deploy: push to main, then on render.com create a new Blueprint from the
+# repo (exoexo0011/EXO-OSINT). Render reads this file automatically.
+services:
+  - type: web
+    name: exo-osint-api
+    runtime: python
+    plan: free
+    region: oregon
+    branch: main
+    # Install the web layer + the core engine deps. server/requirements.txt
+    # already pulls in ../requirements.txt, but both are listed explicitly
+    # per the deployment spec.
+    buildCommand: pip install -r server/requirements.txt -r requirements.txt
+    # Bind to 0.0.0.0 and the port Render injects via $PORT.
+    startCommand: uvicorn server.app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      # Pin a stable Python with reliable wheels for cryptography/dnspython/etc.
+      - key: PYTHON_VERSION
+        value: "3.12.7"
